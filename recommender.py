@@ -1,38 +1,68 @@
 # recommender.py
-
 import pandas as pd
 import numpy as np
-from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.cluster import KMeans
-from scipy.spatial.distance import cdist
+from sklearn.neighbors import NearestNeighbors
+from scipy.sparse import csr_matrix
 
-# Load your dataset
-data = pd.read_csv("data.csv")
+# Load the data (ensure 'data.csv' is in the same directory as this script)
+df = pd.read_csv('data.csv')
 
-# Select numerical columns for clustering
-X = data.select_dtypes(np.number)
-number_cols = list(X.columns)
+# Preprocess and standardize features
+audio_features = ['valence', 'acousticness', 'danceability', 'duration_ms',
+                  'energy', 'instrumentalness', 'key', 'liveness',
+                  'loudness', 'mode', 'popularity', 'speechiness', 'tempo', 'year']
 
-# Fit KMeans clustering (for internal structure – optional but used in your notebook)
-song_cluster_pipeline = Pipeline([
-    ('scaler', StandardScaler()),
-    ('kmeans', KMeans(n_clusters=20, verbose=False))
-])
-song_cluster_pipeline.fit(X)
-data['cluster_label'] = song_cluster_pipeline.predict(X)
+scaler = StandardScaler()
+content_scaled = scaler.fit_transform(df[audio_features])
 
-# Recommendation function
-def recommend(song_title, n_recommendations=5):
-    if song_title not in data['name'].values:
-        return []
+# Fit NearestNeighbors model for content-based recommendations
+nn_model_content = NearestNeighbors(n_neighbors=11, metric='cosine', algorithm='brute')
+nn_model_content.fit(content_scaled)
 
-    song_index = data[data['name'] == song_title].index[0]
-    song_features = data.loc[song_index, number_cols].values.reshape(1, -1)
-    song_features = song_features.astype(float)
+# Collaborative filtering setup
+top_songs_df = df.sort_values('popularity', ascending=False).drop_duplicates('name').head(10000)
+top_songs_df = top_songs_df[['name', 'popularity']].copy()
 
-    numeric_data = data[number_cols].apply(pd.to_numeric, errors='coerce').fillna(0).values
-    distances = cdist(song_features, numeric_data, metric='euclidean')
-    similar_indices = distances.argsort()[0][1:n_recommendations + 1]
+# Simulate user interactions
+top_songs_df = pd.concat([top_songs_df] * 3, ignore_index=True)
+top_songs_df['user_id'] = top_songs_df.index % 5000
+
+grouped_df = top_songs_df.groupby(['user_id', 'name']).agg({'popularity': 'mean'}).reset_index()
+pivot_df = grouped_df.pivot(index='user_id', columns='name', values='popularity').fillna(0)
+sparse_matrix = csr_matrix(pivot_df.values)
+
+model_knn = NearestNeighbors(metric='cosine', algorithm='brute')
+model_knn.fit(sparse_matrix)
+
+def get_content_recommendations(song_name, top_n=5):
+    idx_list = df[df['name'].str.lower() == song_name.lower()].index
+    if idx_list.empty:
+        return "Sorry, we couldn't find the track. Try again with a different song!"
     
-    return data.loc[similar_indices, 'name'].tolist()
+    idx = idx_list[0]
+    distances, indices = nn_model_content.kneighbors([content_scaled[idx]], n_neighbors=top_n+1)
+    rec_indices = indices[0][1:]
+    
+    return df.iloc[rec_indices][['name', 'artists', 'popularity']]
+
+def get_collab_recommendations(song_name, top_n=5):
+    if song_name not in pivot_df.columns:
+        return "Sorry, we couldn't find the track. Try again with a different song!"
+    
+    song_idx = pivot_df.columns.get_loc(song_name)
+    song_vector = pivot_df.T.iloc[song_idx].values.reshape(1, -1)
+    
+    distances, indices = model_knn.kneighbors(song_vector, n_neighbors=top_n+1)
+    rec_indices = indices.flatten()[1:]
+    rec_songs = pivot_df.columns[rec_indices]
+    
+    return df[df['name'].isin(rec_songs)][['name', 'artists', 'popularity']].drop_duplicates()
+
+def recommend(song_name, method='content', top_n=5):
+    if method == 'content':
+        return get_content_recommendations(song_name, top_n)
+    elif method == 'collab':
+        return get_collab_recommendations(song_name, top_n)
+    else:
+        return "Method must be either 'content' or 'collab'."
