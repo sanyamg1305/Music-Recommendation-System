@@ -1,32 +1,29 @@
+# app.py
 import streamlit as st
-from recommender import recommend
+from recommender import recommend  # Import the recommend function
 
-# Page configuration
-st.set_page_config(page_title="Music Recommender 🎧", page_icon="🎶", layout="centered")
+# Set the title of the app
+st.title("Music Recommendation System")
 
-# App header
-st.markdown("<h1 style='text-align: center; color: #ff4b4b;'>🎵 Music Recommender 🎵</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; color: grey;'>Discover songs similar to your favorites</p>", unsafe_allow_html=True)
+# Create an input field for the song name
+song_name = st.text_input("Enter a song name:")
 
-# Text input
-song_input = st.text_input("🔍 Enter a song name you like:", placeholder="e.g. Shape of You")
+# Ask the user to select a recommendation method (content-based or collaborative)
+method = st.radio("Choose recommendation method:", ("content", "collab"))
 
-# Button and logic
-if st.button("🎧 Recommend Songs"):
-    if song_input.strip() == "":
-        st.warning("⚠️ Please enter a song name.")
-    else:
-        results = recommend(song_input.strip())
-        if results:
-            st.success(f"🎶 Here are songs similar to **{song_input}**:")
-            st.markdown("<ul style='line-height: 2;'>", unsafe_allow_html=True)
-            for idx, song in enumerate(results, 1):
-                st.markdown(f"<li><b>{idx}. {song}</b></li>", unsafe_allow_html=True)
-            st.markdown("</ul>", unsafe_allow_html=True)
+# When the user clicks the "Get Recommendations" button
+if st.button("Get Recommendations"):
+    if song_name:
+        # Get recommendations using the selected method
+        recommendations = recommend(song_name, method=method, top_n=5)
+        
+        # Check if the recommendation function returned a message or actual songs
+        if isinstance(recommendations, str):
+            st.write(recommendations)  # If it's a string (e.g., "track not found"), display the message
         else:
-            st.error(f"🤷‍♂️ Hmm... we couldn't find **{song_input}** in our playlist.")
-            st.markdown("Try another song — maybe this one hasn’t hit our radar yet. 👽")
-
-# Footer
-st.markdown("---")
-st.markdown("<p style='text-align: center; font-size: 13px;'>Built with ❤️ using Streamlit</p>", unsafe_allow_html=True)
+            # Display the recommendations in a nice format
+            st.write("Here are 5 similar songs:")
+            for idx, row in recommendations.iterrows():
+                st.write(f"**{row['name']}** (Popularity: {row['popularity']})")
+    else:
+        st.write("Please enter a song name.")
